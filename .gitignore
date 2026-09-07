@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.cache/
+test-results/
+playwright-report/
+
+# Other projects and private local files
+docs/baseline-sha256.json
+scripts/verify-baseline.py
+.env
+.env.*
+.DS_Store

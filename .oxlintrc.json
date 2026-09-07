@@ -1,0 +1,1 @@
+{"plugins":["typescript","react","jsx-a11y"],"categories":{"correctness":"error"},"env":{"browser":true,"node":true},"rules":{"typescript/no-explicit-any":"error"}}

@@ -1,0 +1,40 @@
+{
+  "verifiedAt": "2026-09-07T11:11:40.606257+00:00",
+  "scope": "sat-shubo-game only; local release; no publication",
+  "lint": "passed",
+  "typecheck": "passed",
+  "unitTests": 16,
+  "e2e": {
+    "passed": 18,
+    "failed": 0,
+    "skipped": 0,
+    "lastRun": {
+      "status": "passed",
+      "failedTests": []
+    },
+    "viewports": [
+      "1440x1000",
+      "360x800 touch emulation",
+      "390x844 touch emulation"
+    ],
+    "realWallClockScenarios": 3
+  },
+  "originalFileHashesUnchanged": 1005,
+  "build": {
+    "dist/index.html": "febed54aaf8075d1834cace0d737d77673ad1e2dc0b0cae8c0e1de839f514b66",
+    "dist/assets/index-BvGtg64i.css": "8ad5473b26791ea43c959d7419acf7339e313a8f78533711579b3f815f261b76",
+    "dist/assets/index-BaO0KdjK.js": "98c7da6957786b56764c4f23ddce8838e877b1641097f01e579c485b243a2cea"
+  },
+  "source": {
+    "src/main.tsx": "117937d24a098cc5778def780ebf61576fbe1dd1bdca1bf023b9b4041c2f3e08",
+    "src/science.ts": "2989bd31df9fe5e1e645f85fc83fc2c1cd5466095ed629c84dc753ce322e4b8b",
+    "src/storage.ts": "e90a9947e9ecf9734f19f737e8a5496c4278b3c99fda264507f85e886492c433",
+    "src/model.ts": "12877ec45ce3a326bd9c040a223a923b5d247221fbb9d63ed572417f07293e2c",
+    "src/style.css": "0ec41bd175eaac34bcb95903a7082ad38c27e9cbf1c3a0804c1316534660da0c"
+  },
+  "limitations": [
+    "Real iOS/Android devices, Safari and Firefox not tested",
+    "Scientific expert review and independent user playtest not completed",
+    "Existing site and publication integration not performed"
+  ]
+}
