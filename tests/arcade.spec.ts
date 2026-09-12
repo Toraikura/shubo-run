@@ -82,13 +82,23 @@ function route(s: Awaited<ReturnType<typeof observe>>): Direction {
   // A blocked escape is resolved by the visible pulse/dash controls on the next loop.
   return 'right';
 }
-async function playToEnd(page: Page, touch: boolean) {
+async function playToEnd(page: Page, touch: boolean, support: string) {
   for (let i = 0; i < 500; i++) {
     const s = await observe(page);
     if (s.status === 'won' || s.status === 'lost') return s;
     if (s.status === 'wave') {
+      const choice = page.getByRole('button', { name: support, exact: true });
+      if (touch) await choice.tap();
+      else await choice.click();
+      await expect(choice).toHaveAttribute('aria-pressed', 'true');
       await page.getByRole('button', { name: '次のステージへ' }).click();
       await page.clock.runFor(50);
+      if (support === '補給を満タン')
+        await expect(page.locator('#energy')).toHaveAttribute('value', '100');
+      if (support === '時間を増やす')
+        expect(
+          Number.parseInt((await page.getByTestId('time').textContent())!, 10),
+        ).toBeGreaterThan(s.wave === 0 ? 50 : 55);
       continue;
     }
     if (s.status === 'paused')
@@ -158,7 +168,15 @@ for (const [mode, label] of [
         path: `docs/screenshots/${info.project.name}-playing.png`,
         fullPage: false,
       });
-    const result = await playToEnd(page, touch);
+    const result = await playToEnd(
+      page,
+      touch,
+      mode === 'low'
+        ? '守りを固める'
+        : mode === 'middle'
+          ? '補給を満タン'
+          : '時間を増やす',
+    );
     expect(result.status).toBe('won');
     await expect(page.getByText('踏破、おめでとう！')).toBeVisible();
     await page.screenshot({
@@ -248,13 +266,29 @@ test('failure → retry, dash, pause on blur/hidden/offscreen, science and no ov
     'paused',
   );
   await page.getByRole('button', { name: 'プレイを再開' }).click();
-  await page.getByText('出典とゲーム表現の違いを見る').click();
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  await page.clock.runFor(200);
-  await expect(page.getByTestId('board')).toHaveAttribute(
-    'data-status',
-    'paused',
-  );
+  if (touch) {
+    // Active phone play now occupies the viewport. It must not be scrolled
+    // away to reach reference material; first leave the session explicitly.
+    const before = await page.evaluate(() => window.scrollY);
+    await page.mouse.wheel(0, 800);
+    await page.clock.runFor(200);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+    await expect(page.getByTestId('board')).toHaveAttribute(
+      'data-status',
+      'playing',
+    );
+    await page.getByRole('button', { name: '一時停止', exact: true }).click();
+    await page.getByRole('button', { name: 'このプレイをやめる' }).click();
+    await page.getByText('出典とゲーム表現の違いを見る').click();
+  } else {
+    await page.getByText('出典とゲーム表現の違いを見る').click();
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.clock.runFor(200);
+    await expect(page.getByTestId('board')).toHaveAttribute(
+      'data-status',
+      'paused',
+    );
+  }
   await expect(page.getByText('出典で確認', { exact: true })).toBeVisible();
   await expect(page.getByText('教育用の簡略化', { exact: true })).toBeVisible();
   await expect(

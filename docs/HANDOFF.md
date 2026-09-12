@@ -11,11 +11,11 @@
 | SHUBO RUN（迷路・採取アーケード） | https://toraikura.github.io/shubo-run/ | https://github.com/Toraikura/shubo-run |
 | SAKE CLASH（カード陣取り） | https://toraikura.github.io/sake-clash/ | https://github.com/Toraikura/sake-clash |
 
-各リポジトリのmain更新はCI成功後に自動公開。レビューする変更はブランチ/PRで扱う。初期版v1.0.0を保持。
+各リポジトリのmain更新はCI成功後に自動公開。レビューする変更はブランチ/PRで扱う。初期版v1.0.0を保持。v2.0ではユーザーが改善・検証・公開まで一任。
 
 ## 現在の作品
 
-3ステージの糖採取アーケード。低め/中間/高めの架空環境、2プレイスタイル、移動、パルス、ダッシュ、ポーズ、再挑戦、localStorage記録。仕様はREADME参照。公開準備ではゲーム本体のsrcを変更していない。
+3ステージの糖採取アーケード。低め/中間/高めの架空環境、2プレイスタイル、移動、パルス、ダッシュ、ポーズ、再挑戦、localStorage記録。仕様はREADME参照。v2.0はスワイプ、フィーバー、支援選択、日替わり迷路、任意の合成音、iPhone向け画面固定を追加。詳細はREADMEとRELEASE_V2.md。
 
 ## 今後
 

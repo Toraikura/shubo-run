@@ -18,6 +18,7 @@ import {
   type Direction,
   type Temperature,
   type Style,
+  type WaveBoost,
 } from './model';
 import {
   emptyRecords,
@@ -32,7 +33,28 @@ import {
   fictionalNote,
   disclaimer,
 } from './science';
+import { createSound } from './audio';
 import './style.css';
+const arrows: Record<Direction, string> = {
+  up: '↑',
+  down: '↓',
+  left: '←',
+  right: '→',
+  stop: '■',
+};
+const PREF_KEY = 'shubo-run:preferences:v2';
+function dailySeed() {
+  return Number(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tokyo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .format(new Date())
+      .replace(/\D/g, ''),
+  );
+}
 const nf = new Intl.NumberFormat('ja-JP');
 const KEYS: Record<string, Direction> = {
   ArrowUp: 'up',
@@ -59,7 +81,7 @@ function Board({ g }: { g: Game }) {
       viewBox="0 0 510 510"
       role="img"
       aria-label={`酒母の迷路。自分は左から${g.player.x}、上から${g.player.y}。糖${g.collected}個、ハート${g.hp}。`}
-      className="board"
+      className={`board ${g.fever > 0 ? 'fever-board' : ''}`}
       data-testid="board"
       data-status={g.status}
       data-x={g.player.x}
@@ -67,6 +89,8 @@ function Board({ g }: { g: Game }) {
       data-step={mode.playerStep}
       data-wave={g.wave}
       data-hp={g.hp}
+      data-fever={g.fever.toFixed(2)}
+      data-energy={Math.floor(g.energy)}
     >
       <defs>
         <pattern
@@ -75,10 +99,10 @@ function Board({ g }: { g: Game }) {
           height="15"
           patternUnits="userSpaceOnUse"
         >
-          <circle cx="2" cy="2" r=".7" fill="#d7cfb9" />
+          <circle cx="2" cy="2" r=".7" fill="#384744" />
         </pattern>
       </defs>
-      <rect width="510" height="510" fill="#f5f0df" />
+      <rect width="510" height="510" fill="#102c2b" />
       <rect width="510" height="510" fill="url(#paper)" />
       {[
         { x: 30, y: 30 },
@@ -110,10 +134,10 @@ function Board({ g }: { g: Game }) {
                 rx={x === 0 || y === 0 || x === 16 || y === 16 ? 8 : 9}
                 fill={
                   x === 0 || y === 0 || x === 16 || y === 16
-                    ? '#233c33'
-                    : '#d6ceb9'
+                    ? '#284f48'
+                    : '#35544c'
                 }
-                stroke="#233c33"
+                stroke="#6d9180"
                 strokeWidth="1.5"
               />
             ) : null,
@@ -151,7 +175,7 @@ function Board({ g }: { g: Game }) {
               <circle r="3" fill="#fff8d6" />
             </>
           ) : (
-            <circle r="4.3" fill="#bd7b0e" stroke="#75500c" strokeWidth="1" />
+            <circle r="4.3" fill="#ffe2a0" stroke="#c19549" strokeWidth="1" />
           )}
         </g>
       ))}
@@ -173,10 +197,10 @@ function Board({ g }: { g: Game }) {
               e.stunned > 0
                 ? '#e9e5da'
                 : e.type === 'chase'
-                  ? '#edb834'
+                  ? '#e7858b'
                   : e.type === 'ambush'
-                    ? '#e48a57'
-                    : '#c1b277'
+                    ? '#bf9be7'
+                    : '#72bbd0'
             }
             stroke="#28392e"
             strokeWidth="2"
@@ -195,13 +219,23 @@ function Board({ g }: { g: Game }) {
           )}
         </g>
       ))}
+      {g.status === 'playing' && g.direction !== 'stop' && (
+        <path
+          className="motion-trail"
+          d={`M${g.previous.x * 30 + 15} ${g.previous.y * 30 + 15}L${g.player.x * 30 + 15} ${g.player.y * 30 + 15}`}
+          stroke={g.fever > 0 ? '#ffe3a0' : '#ec703c'}
+          strokeWidth={g.dash > 0 ? 18 : 9}
+          strokeLinecap="round"
+          opacity=".35"
+        />
+      )}
       <g
         className={`actor player ${g.dash > 0 ? 'dashing' : ''}`}
         style={{
           transform: `translate(${g.player.x * 30 + 15}px,${g.player.y * 30 + 15}px)`,
         }}
       >
-        {g.invincible > 0 && (
+        {(g.invincible > 0 || g.fever > 0) && (
           <circle
             r="17"
             fill="none"
@@ -219,7 +253,12 @@ function Board({ g }: { g: Game }) {
             strokeWidth="3"
           />
         )}
-        <circle r="12" fill="#ec703c" stroke="#332e24" strokeWidth="2" />
+        <circle
+          r="12"
+          fill={g.fever > 0 ? '#ffe06d' : '#ff8857'}
+          stroke="#332e24"
+          strokeWidth="2"
+        />
         <circle
           cx="9"
           cy="-8"
@@ -266,6 +305,105 @@ function App() {
   const arena = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
   const recorded = useRef(false);
+  const [theatre, setTheatre] = useState(false);
+  const [daily, setDaily] = useState(false);
+  const [boost, setBoost] = useState<WaveBoost>('shield');
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [sound] = useState(() => createSound());
+  const swipe = useRef<{ id: number; x: number; y: number } | null>(null);
+  const bestBefore = useRef(0);
+  const feedback = useRef({
+    score: 0,
+    hp: 3,
+    combo: 0,
+    skills: 0,
+    fever: 0,
+    status: 'ready',
+  });
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PREF_KEY) || '{}');
+      if (saved.sound === true) {
+        setSoundEnabled(true);
+        sound.setEnabled(true);
+      }
+      if (saved.daily === true) {
+        const n = dailySeed();
+        setDaily(true);
+        setSeed(String(n));
+        game.current = createGame('middle', 'gatherer', n);
+        setG({ ...game.current });
+      }
+    } catch {
+      /* Optional preferences must not block play. */
+    }
+    return () => sound.dispose();
+  }, [sound]);
+  useEffect(() => {
+    const old = feedback.current;
+    if (g.status === 'playing') {
+      if (g.hp < old.hp) sound.play('hit');
+      else if (g.fever > 0 && old.fever <= 0) sound.play('fever');
+      else if (g.skills > old.skills) sound.play(g.dash > 0 ? 'dash' : 'pulse');
+      else if (g.score > old.score)
+        sound.play(g.combo >= 5 && g.combo % 5 === 0 ? 'combo' : 'collect');
+    }
+    if (g.status !== old.status) {
+      if (g.status === 'wave') {
+        sound.play('clear');
+        setBoost('shield');
+      }
+      if (g.status === 'won') sound.play('win');
+      if (g.status === 'lost') sound.play('lose');
+      if (g.status === 'paused') sound.suspend();
+    }
+    feedback.current = {
+      score: g.score,
+      hp: g.hp,
+      combo: g.combo,
+      skills: g.skills,
+      fever: g.fever,
+      status: g.status,
+    };
+  }, [g, sound]);
+  useEffect(() => {
+    let landscape = window.innerWidth > window.innerHeight;
+    const viewport = () => {
+      document.documentElement.style.setProperty(
+        '--play-height',
+        `${window.visualViewport?.height || window.innerHeight}px`,
+      );
+      const next = window.innerWidth > window.innerHeight;
+      if (next !== landscape && game.current.status === 'playing') {
+        pause(game.current);
+        setPauseReason('画面の向きが変わったため停止しました。');
+        setG({ ...game.current });
+        swipe.current = null;
+      }
+      landscape = next;
+    };
+    viewport();
+    window.visualViewport?.addEventListener('resize', viewport);
+    window.addEventListener('resize', viewport);
+    const rotate = () => {
+      if (game.current.status === 'playing') {
+        pause(game.current);
+        setPauseReason('画面の向きが変わったため停止しました。');
+        setG({ ...game.current });
+      }
+      swipe.current = null;
+    };
+    window.addEventListener('orientationchange', rotate);
+    return () => {
+      window.visualViewport?.removeEventListener('resize', viewport);
+      window.removeEventListener('resize', viewport);
+      window.removeEventListener('orientationchange', rotate);
+    };
+  }, []);
+  useEffect(() => {
+    document.body.classList.toggle('game-open', theatre);
+    return () => document.body.classList.remove('game-open');
+  }, [theatre]);
   const active =
     g.status === 'playing' || g.status === 'paused' || g.status === 'wave';
   const update = () => setG({ ...game.current });
@@ -366,6 +504,11 @@ function App() {
       )
         return;
       const s = game.current;
+      if (
+        KEYS[e.key] ||
+        ['Escape', 'p', 'P', 'j', 'J', 'k', 'K', 'Shift', ' '].includes(e.key)
+      )
+        sound.unlock();
       if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
         if (s.status === 'playing') {
           pause(s);
@@ -392,7 +535,7 @@ function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [sound]);
   const focusArena = () => arena.current?.focus({ preventScroll: true });
   const frameGame = () => {
     arena.current
@@ -401,6 +544,17 @@ function App() {
     focusArena();
   };
   const start = (same = false) => {
+    sound.unlock();
+    setTheatre(true);
+    bestBefore.current = records.high[same ? g.temperature : temperature];
+    feedback.current = {
+      score: 0,
+      hp: 3,
+      combo: 0,
+      skills: 0,
+      fever: 0,
+      status: 'ready',
+    };
     game.current = createGame(
       same ? g.temperature : temperature,
       same ? g.style : style,
@@ -423,16 +577,19 @@ function App() {
     update();
   };
   const act = (kind: 'pulse' | 'dash') => {
+    sound.unlock();
     skill(game.current, kind);
     update();
     focusArena();
   };
   const move = (direction: Direction) => {
+    sound.unlock();
     steer(game.current, direction);
     update();
     focusArena();
   };
   const togglePause = () => {
+    sound.unlock();
     if (g.status === 'playing') {
       pause(game.current);
       setPauseReason('');
@@ -443,7 +600,7 @@ function App() {
   const wave = WAVES[g.wave];
   const terminal = g.status === 'won' || g.status === 'lost';
   return (
-    <>
+    <div className={theatre ? 'play-session' : ''}>
       <header className="brand-bar">
         <a href="#main" className="brand">
           <span className="sat-mark">SAT</span>
@@ -451,7 +608,7 @@ function App() {
             SAKE ART TOKYO<small>FERMENTATION PLAYGROUND</small>
           </span>
         </a>
-        <span className="edition">PLAY NOTE / 01</span>
+        <span className="edition">ARCADE / 02</span>
       </header>
       <main id="main">
         <div className="title-line">
@@ -465,11 +622,41 @@ function App() {
           <span className="local-stamp">
             3 STAGES
             <br />
-            LOCAL ARCADE
+            FEVER EDITION
           </span>
         </div>
         <div className="game-layout">
           <section className="setup" aria-label="プレイ設定">
+            <div className="daily-selector">
+              <button
+                aria-label="今日のコース"
+                disabled={active}
+                aria-pressed={daily}
+                onClick={() => {
+                  const n = daily ? 260907 : dailySeed();
+                  setDaily(!daily);
+                  setSeed(String(n));
+                  game.current = createGame(temperature, style, n);
+                  update();
+                  try {
+                    localStorage.setItem(
+                      PREF_KEY,
+                      JSON.stringify({ sound: soundEnabled, daily: !daily }),
+                    );
+                  } catch {
+                    /* optional */
+                  }
+                }}
+              >
+                <span>◈</span> 今日のコース{' '}
+                <small>{daily ? '選択中' : '毎日かわる'}</small>
+              </button>
+              <span>
+                {daily
+                  ? '日本時間で毎日更新。同じ日・設定で同じ配置。'
+                  : 'まずは定番コース。何度でも腕試し。'}
+              </span>
+            </div>
             <div className="section-cap">
               01 / ENVIRONMENT <span>ゲーム内の相対環境</span>
             </div>
@@ -539,7 +726,18 @@ function App() {
                   max="4294967295"
                   disabled={active}
                   value={seed}
-                  onChange={(e) => setSeed(e.target.value)}
+                  onChange={(e) => {
+                    setDaily(false);
+                    setSeed(e.target.value);
+                    try {
+                      localStorage.setItem(
+                        PREF_KEY,
+                        JSON.stringify({ sound: soundEnabled, daily: false }),
+                      );
+                    } catch {
+                      /*optional*/
+                    }
+                  }}
                   onBlur={() =>
                     setSeed(
                       String(createGame(temperature, style, Number(seed)).seed),
@@ -552,7 +750,37 @@ function App() {
               </p>
             </details>
           </section>
-          <section className="field" aria-label="酒母アーケード">
+          <section
+            className={`field ${g.fever > 0 ? 'is-fever' : ''}`}
+            aria-label="酒母アーケード"
+          >
+            <div className="play-topline">
+              <b>
+                SHUBO RUN <span>/ {daily ? 'DAILY' : 'ARCADE'}</span>
+              </b>
+              <button
+                className="sound-toggle"
+                aria-label="サウンド"
+                aria-pressed={soundEnabled}
+                onClick={() => {
+                  const on = !soundEnabled;
+                  setSoundEnabled(on);
+                  sound.setEnabled(on);
+                  sound.unlock();
+                  if (on) sound.play('collect');
+                  try {
+                    localStorage.setItem(
+                      PREF_KEY,
+                      JSON.stringify({ sound: on, daily }),
+                    );
+                  } catch {
+                    /* optional */
+                  }
+                }}
+              >
+                {soundEnabled ? '♪ 音 ON' : '♪ 音 OFF'}
+              </button>
+            </div>
             <div className="scoreboard">
               <div>
                 <span className="stat-label">SCORE</span>
@@ -600,19 +828,74 @@ function App() {
                 </span>
               </span>
             </div>
+            <progress
+              className="goal-track"
+              aria-label="ステージの糖"
+              value={g.collected}
+              max={wave.goal}
+            />
             {/* The focusable game surface owns arrow/WASD controls and is the focus return target. */}
             {/* oxlint-disable jsx-a11y/no-noninteractive-tabindex */}
             <div
               ref={arena}
               className="arena"
+              onPointerDown={(e) => {
+                if (
+                  game.current.status !== 'playing' ||
+                  !e.isPrimary ||
+                  e.button !== 0
+                )
+                  return;
+                swipe.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+                e.currentTarget.setPointerCapture(e.pointerId);
+              }}
+              onPointerMove={(e) => {
+                const p = swipe.current;
+                if (!p || p.id !== e.pointerId) return;
+                const dx = e.clientX - p.x,
+                  dy = e.clientY - p.y;
+                if (Math.max(Math.abs(dx), Math.abs(dy)) < 18) return;
+                move(
+                  Math.abs(dx) > Math.abs(dy)
+                    ? dx > 0
+                      ? 'right'
+                      : 'left'
+                    : dy > 0
+                      ? 'down'
+                      : 'up',
+                );
+                swipe.current = { id: p.id, x: e.clientX, y: e.clientY };
+              }}
+              onPointerUp={(e) => {
+                if (swipe.current?.id === e.pointerId) swipe.current = null;
+              }}
+              onPointerCancel={() => {
+                swipe.current = null;
+              }}
+              onLostPointerCapture={() => {
+                swipe.current = null;
+              }}
               tabIndex={0}
               role="application"
-              aria-label="操作エリア。矢印またはWASDで移動、Jでパルス、Kでダッシュ、Xで停止、Pで一時停止。"
+              aria-label="操作エリア。スワイプまたは方向ボタンで移動、パルスで足止め、ダッシュで回避。キーボードにも対応。"
               aria-describedby="controls-help"
             >
               <Board g={g} />
               {g.status === 'playing' && (
                 <>
+                  <div className="fever-status" data-testid="fever-status">
+                    {g.fever > 0 ? (
+                      <>
+                        <b>FEVER!</b> 採取点×2・接触無効{' '}
+                        <span>{g.fever.toFixed(1)}s</span>
+                      </>
+                    ) : (
+                      <>
+                        FEVER <b>{g.feverCharge}/10</b>
+                        <i style={{ width: `${g.feverCharge * 10}%` }} />
+                      </>
+                    )}
+                  </div>
                   <div className="combo-tag" aria-label={`${g.combo}コンボ`}>
                     <b>{g.combo}</b> COMBO{' '}
                     <span>
@@ -665,7 +948,7 @@ function App() {
                         <p>
                           橙の酵母キャラを操作。
                           <br />
-                          糖を集め、競合をかわす3ステージ。
+                          10連続でフィーバー。競合をかわして3ステージへ。
                         </p>
                         <div className="start-instructions">
                           <span>◆ 糖を{wave.goal}個</span>
@@ -675,13 +958,12 @@ function App() {
                         <button
                           ref={primary}
                           className="primary"
+                          aria-label="プレイ開始"
                           onClick={() => start()}
                         >
                           プレイ開始 <span>→</span>
                         </button>
-                        <p className="small">
-                          矢印 / WASD または下の方向ボタン
-                        </p>
+                        <p className="small">スワイプ、または下の矢印で進む</p>
                       </>
                     ) : g.status === 'paused' ? (
                       <>
@@ -696,6 +978,7 @@ function App() {
                         <button
                           className="text-button"
                           onClick={() => {
+                            setTheatre(false);
                             game.current = createGame(
                               temperature,
                               style,
@@ -718,13 +1001,52 @@ function App() {
                         <p>
                           次は糖を{WAVES[g.wave + 1].goal}個。
                           <br />
-                          エネルギー+25で出発。
+                          エネルギー+25。支援をひとつ選ぼう。
                         </p>
+                        <fieldset
+                          className="boost-choices"
+                          aria-label="次のステージの支援"
+                        >
+                          {(
+                            [
+                              {
+                                id: 'shield',
+                                icon: '◉',
+                                name: '守りを固める',
+                                detail: '6秒の接触無効',
+                              },
+                              {
+                                id: 'energy',
+                                icon: 'ϟ',
+                                name: '補給を満タン',
+                                detail: 'エネルギー100',
+                              },
+                              {
+                                id: 'time',
+                                icon: '◷',
+                                name: '時間を増やす',
+                                detail: '制限時間＋12秒',
+                              },
+                            ] as const
+                          ).map((b) => (
+                            <button
+                              key={b.id}
+                              aria-label={b.name}
+                              aria-pressed={boost === b.id}
+                              onClick={() => setBoost(b.id)}
+                            >
+                              <b>{b.icon}</b>
+                              <strong>{b.name}</strong>
+                              <small>{b.detail}</small>
+                            </button>
+                          ))}
+                        </fieldset>
                         <button
                           ref={primary}
                           className="primary"
                           onClick={() => {
-                            nextWave(game.current);
+                            sound.unlock();
+                            nextWave(game.current, boost);
                             update();
                             focusArena();
                           }}
@@ -734,6 +1056,11 @@ function App() {
                       </>
                     ) : (
                       <>
+                        {g.score > bestBefore.current && (
+                          <div className="new-best">
+                            ✦ NEW BEST / 自己ベスト更新
+                          </div>
+                        )}
                         <div className="rank-line">
                           <b>{rank(g)}</b>
                           <div>
@@ -764,6 +1091,19 @@ function App() {
                         <button
                           className="text-button"
                           onClick={() => {
+                            setTheatre(false);
+                            setDaily(false);
+                            try {
+                              localStorage.setItem(
+                                PREF_KEY,
+                                JSON.stringify({
+                                  sound: soundEnabled,
+                                  daily: false,
+                                }),
+                              );
+                            } catch {
+                              /* optional */
+                            }
                             const next = (g.seed % 4294967294) + 1;
                             setSeed(String(next));
                             game.current = createGame(temperature, style, next);
@@ -793,6 +1133,17 @@ function App() {
                 <meter id="acid" min="0" max="100" value={g.acid} />
               </div>
             </div>
+            <div className="direction-hint" data-testid="direction-hint">
+              <span>
+                <b>{arrows[g.desired]}</b>{' '}
+                {g.desired === 'stop'
+                  ? '方向を選んで進む'
+                  : g.desired !== g.direction
+                    ? '次の曲がり角で曲がる'
+                    : 'この方向に進行中'}
+              </span>
+              <small>スワイプでも操作できます</small>
+            </div>
             <div className="touch-controls" aria-label="タッチ操作">
               <div className="dpad">
                 {(
@@ -809,7 +1160,15 @@ function App() {
                     className={`direction ${d}`}
                     aria-label={label}
                     disabled={g.status !== 'playing'}
-                    onClick={() => move(d)}
+                    aria-pressed={g.desired === d}
+                    onPointerDown={(e) => {
+                      if (!e.isPrimary || e.button !== 0) return;
+                      e.preventDefault();
+                      move(d);
+                    }}
+                    onClick={(e) => {
+                      if (e.detail === 0) move(d);
+                    }}
                   >
                     {icon}
                   </button>
@@ -818,24 +1177,31 @@ function App() {
               <div className="skill-buttons">
                 <button
                   className="pulse-button"
-                  disabled={
-                    g.status !== 'playing' ||
-                    g.cooldown > 0 ||
-                    g.energy < (style === 'breaker' ? 30 : 40)
-                  }
+                  disabled={g.status !== 'playing'}
                   onClick={() => act('pulse')}
                 >
                   ✳ パルス{' '}
-                  <small>J / {style === 'breaker' ? 30 : 40}消費</small>
+                  <small>
+                    {g.cooldown > 0
+                      ? `あと${g.cooldown.toFixed(1)}秒`
+                      : g.energy < (style === 'breaker' ? 30 : 40)
+                        ? 'エネルギー不足'
+                        : '近くの競合を止める'}
+                  </small>
                 </button>
                 <button
                   className="dash-button"
-                  disabled={
-                    g.status !== 'playing' || g.cooldown > 0 || g.energy < 25
-                  }
+                  disabled={g.status !== 'playing'}
                   onClick={() => act('dash')}
                 >
-                  ↗ ダッシュ <small>K / 25消費</small>
+                  ↗ ダッシュ{' '}
+                  <small>
+                    {g.cooldown > 0
+                      ? `あと${g.cooldown.toFixed(1)}秒`
+                      : g.energy < 25
+                        ? 'エネルギー不足'
+                        : '加速＋接触をすり抜ける'}
+                  </small>
                 </button>
                 <span className="cooldown" data-testid="cooldown">
                   {g.cooldown > 0
@@ -845,10 +1211,11 @@ function App() {
               </div>
             </div>
             <p id="controls-help" className="control-help">
-              方向を押すと進み続けます。■ / Xで停止。
-              <br className="mobile-only" />
-              矢印・WASD / J・Space：パルス / K・Shift：ダッシュ /
-              P・Esc：ポーズ
+              方向を押すと進み続けます。■で停止。
+              <span className="keyboard-help">
+                {' '}
+                矢印・WASD / J：パルス / K：ダッシュ / P：ポーズ
+              </span>
             </p>
           </section>
           <aside className="notebook">
@@ -977,13 +1344,13 @@ function App() {
         <span>
           会員登録なし・広告なし・外部送信なし
           <br />
-          LOCAL EXPERIMENT — 2026
+          FEVER EDITION — 2026
         </span>
       </footer>
       <output className="sr-only" aria-live="polite">
         {announcement}
       </output>
-    </>
+    </div>
   );
 }
 createRoot(document.getElementById('root')!).render(<App />);
