@@ -2,11 +2,18 @@
  * They do not estimate fermentation, pH, microbial counts, quality or drinkability. */
 export type Temperature = 'low' | 'middle' | 'high';
 export type Style = 'gatherer' | 'breaker';
+export type WaveBoost = 'shield' | 'energy' | 'time';
 export type Direction = 'up' | 'down' | 'left' | 'right' | 'stop';
 export type Status = 'ready' | 'playing' | 'paused' | 'wave' | 'won' | 'lost';
 export type Point = { x: number; y: number };
 export const SIZE = 17;
 export const STEP = 1 / 60;
+export const FEVER = { goal: 10, seconds: 4, multiplier: 2 } as const;
+export const WAVE_BOOSTS = {
+  shield: { label: 'まもり', detail: '最初の6秒、接触から保護' },
+  energy: { label: '補給', detail: 'エネルギー100でスタート' },
+  time: { label: 'ゆとり', detail: '制限時間を12秒追加' },
+} as const;
 export const MODES = {
   low: {
     label: '低め',
@@ -113,6 +120,10 @@ export type Game = {
   combo: number;
   maxCombo: number;
   comboLeft: number;
+  fever: number;
+  feverCharge: number;
+  feverCount: number;
+  lastBoost: WaveBoost | null;
   collected: number;
   totalCollected: number;
   acidCollected: number;
@@ -138,9 +149,9 @@ export const distance = (a: Point, b: Point) =>
 export function walkable(tiles: string[], p: Point) {
   return tiles[p.y]?.[p.x] === '.';
 }
-export function board(wave: number): string[] {
+export function board(wave: number, seed = 260907): string[] {
   // Even/even blocks form one connected network; each wave adds a different short partition.
-  return Array.from({ length: SIZE }, (_, y) =>
+  const tiles = Array.from({ length: SIZE }, (_, y) =>
     Array.from({ length: SIZE }, (_, x) => {
       if (x === 0 || y === 0 || x === 16 || y === 16) return '#';
       if (x % 2 === 0 && y % 2 === 0) return '#';
@@ -149,6 +160,49 @@ export function board(wave: number): string[] {
       return '.';
     }).join(''),
   );
+  if (normalizeSeed(seed) === 260907) return tiles;
+  // Daily courses rearrange routes immediately, even when high mode fills every tile.
+  // A separate RNG keeps the maze independent of pickup/replenishment RNG usage.
+  let layoutRng = (normalizeSeed(seed) ^ Math.imul(wave + 1, 0x9e3779b9)) >>> 0;
+  const candidates: Point[] = [];
+  for (let y = 1; y < SIZE - 1; y++)
+    for (let x = 1; x < SIZE - 1; x++)
+      if (walkable(tiles, { x, y }) && x % 2 !== y % 2 && !(x <= 3 && y <= 3))
+        candidates.push({ x, y });
+  for (let i = candidates.length - 1; i > 0; i--) {
+    layoutRng = (Math.imul(layoutRng, 1664525) + 1013904223) >>> 0;
+    const j = Math.floor((layoutRng / 4294967296) * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+  let added = 0;
+  for (const { x, y } of candidates) {
+    const before = tiles[y];
+    tiles[y] = `${before.slice(0, x)}#${before.slice(x + 1)}`;
+    if (fullyConnected(tiles)) added++;
+    else tiles[y] = before;
+    if (added >= 8 + wave * 2) break;
+  }
+  return tiles;
+}
+function fullyConnected(tiles: string[]): boolean {
+  const queue: Point[] = [{ x: 1, y: 1 }];
+  const seen = new Set([1 + SIZE]);
+  for (let i = 0; i < queue.length; i++) {
+    for (const d of ['up', 'right', 'down', 'left'] as const) {
+      const p = { x: queue[i].x + DIRS[d].x, y: queue[i].y + DIRS[d].y };
+      const key = p.y * SIZE + p.x;
+      if (walkable(tiles, p) && !seen.has(key)) {
+        seen.add(key);
+        queue.push(p);
+      }
+    }
+  }
+  return seen.size === tiles.join('').split('.').length - 1;
+}
+function normalizeSeed(seed: number) {
+  return Number.isFinite(seed)
+    ? Math.max(1, Math.abs(Math.trunc(seed)) >>> 0)
+    : 260907;
 }
 function random(g: Game) {
   g.rng = (Math.imul(g.rng, 1664525) + 1013904223) >>> 0;
@@ -159,9 +213,7 @@ export function createGame(
   style: Style = 'gatherer',
   seed = 260907,
 ): Game {
-  const safeSeed = Number.isFinite(seed)
-    ? Math.max(1, Math.abs(Math.trunc(seed)) >>> 0)
-    : 260907;
+  const safeSeed = normalizeSeed(seed);
   const g: Game = {
     status: 'ready',
     temperature,
@@ -184,6 +236,10 @@ export function createGame(
     combo: 0,
     maxCombo: 0,
     comboLeft: 0,
+    fever: 0,
+    feverCharge: 0,
+    feverCount: 0,
+    lastBoost: null,
     collected: 0,
     totalCollected: 0,
     acidCollected: 0,
@@ -207,7 +263,7 @@ export function createGame(
   return g;
 }
 function populate(g: Game) {
-  g.tiles = board(g.wave);
+  g.tiles = board(g.wave, g.seed);
   g.player = { x: 1, y: 1 };
   g.previous = { ...g.player };
   g.direction = 'stop';
@@ -230,6 +286,20 @@ function populate(g: Game) {
       else if (draw < mode.density || y === 1)
         g.pickups.push({ x, y, kind: 'sugar' });
     }
+  // Density is a feel setting, never permission to generate an impossible stage.
+  let shortage =
+    WAVES[g.wave].goal - g.pickups.filter((p) => p.kind !== 'acid').length;
+  if (shortage > 0)
+    for (let y = 1; y < SIZE - 1 && shortage > 0; y++)
+      for (let x = 1; x < SIZE - 1 && shortage > 0; x++)
+        if (
+          walkable(g.tiles, { x, y }) &&
+          !equal(g.player, { x, y }) &&
+          !g.pickups.some((p) => p.x === x && p.y === y)
+        ) {
+          g.pickups.push({ x, y, kind: 'sugar' });
+          shortage--;
+        }
   const starts = [
     { x: 15, y: 15 },
     { x: 1, y: 15 },
@@ -252,6 +322,8 @@ function populate(g: Game) {
   g.waveMaxCombo = 0;
   g.combo = 0;
   g.comboLeft = 0;
+  g.fever = 0;
+  g.feverCharge = 0;
   g.timeLeft = WAVES[g.wave].seconds;
   g.invincible = 2;
   g.dash = 0;
@@ -277,13 +349,19 @@ export function pause(g: Game) {
 export function resume(g: Game) {
   if (g.status === 'paused') g.status = 'playing';
 }
-export function nextWave(g: Game) {
-  if (g.status !== 'wave') return;
+export function nextWave(g: Game, boost?: WaveBoost) {
+  if (g.status !== 'wave' || g.wave >= WAVES.length - 1) return;
   g.wave++;
   populate(g);
   g.energy = Math.min(100, g.energy + 25);
+  g.lastBoost = boost ?? null;
+  if (boost === 'shield') g.invincible = 6;
+  if (boost === 'energy') g.energy = 100;
+  if (boost === 'time') g.timeLeft += 12;
   g.status = 'playing';
-  g.message = `STAGE ${g.wave + 1} / ${WAVES[g.wave].goal}個を集めよう`;
+  g.message = boost
+    ? `${WAVE_BOOSTS[boost].detail} / 糖を${WAVES[g.wave].goal}個！`
+    : `STAGE ${g.wave + 1} / ${WAVES[g.wave].goal}個を集めよう`;
   g.messageLeft = 3;
 }
 function say(g: Game, text: string) {
@@ -292,7 +370,18 @@ function say(g: Game, text: string) {
 }
 export function skill(g: Game, kind: 'pulse' | 'dash'): boolean {
   const cost = kind === 'dash' ? 25 : g.style === 'breaker' ? 30 : 40;
-  if (g.status !== 'playing' || g.cooldown > 0 || g.energy < cost) return false;
+  if (g.status !== 'playing') return false;
+  if (g.cooldown > 0) {
+    say(
+      g,
+      `スキル回復まで あと${(Math.ceil(g.cooldown * 10) / 10).toFixed(1)}秒`,
+    );
+    return false;
+  }
+  if (g.energy < cost) {
+    say(g, `エネルギーがあと${Math.ceil(cost - g.energy)}必要 / 糖で補給！`);
+    return false;
+  }
   g.energy -= cost;
   g.skills++;
   g.cooldown = MODES[g.temperature].cooldown;
@@ -330,6 +419,17 @@ function collect(g: Game) {
   g.waveMaxCombo = Math.max(g.waveMaxCombo, g.combo);
   g.comboLeft =
     MODES[g.temperature].comboWindow + (g.style === 'gatherer' ? 1 : 0);
+  let feverStarted = false;
+  // Sugar charges the next burst only outside fever. A burst cannot extend itself.
+  if (p.kind !== 'acid' && g.fever <= 0) {
+    g.feverCharge++;
+    if (g.feverCharge >= FEVER.goal) {
+      g.feverCharge = 0;
+      g.fever = FEVER.seconds;
+      g.feverCount++;
+      feverStarted = true;
+    }
+  }
   const comboMultiplier = 1 + Math.min(3, Math.floor(g.combo / 5)) * 0.5;
   const risk = g.enemies.some(
     (e) => e.stunned <= 0 && distance(e, g.player) <= 2,
@@ -340,7 +440,8 @@ function collect(g: Game) {
     (p.kind === 'gold' ? 180 : p.kind === 'acid' ? 70 : 50) *
       MODES[g.temperature].multiplier *
       comboMultiplier *
-      risk,
+      risk *
+      (g.fever > 0 ? FEVER.multiplier : 1),
   );
   g.energy = Math.min(100, g.energy + (g.style === 'gatherer' ? 8 : 6));
   if (p.kind === 'acid') {
@@ -354,6 +455,7 @@ function collect(g: Game) {
     else if (g.combo % 5 === 0) say(g, `${g.combo} COMBO！`);
   }
   if (risk > 1) say(g, 'ニアミス採取 ×1.5！');
+  if (feverStarted) say(g, 'FEVER！ 4秒間 採取点×2・接触ガード！');
 }
 export function neighbor(g: Game, p: Point, d: Direction): Point {
   const v = DIRS[d];
@@ -403,13 +505,14 @@ function chase(g: Game, e: Enemy) {
   }
 }
 function collision(g: Game) {
-  if (g.invincible > 0) return;
+  if (g.invincible > 0 || g.fever > 0) return;
   if (g.enemies.some((e) => e.stunned <= 0 && equal(e, g.player))) {
     g.hp--;
     g.waveHits++;
     g.totalHits++;
     g.combo = 0;
     g.comboLeft = 0;
+    g.feverCharge = 0;
     g.invincible = 2.2;
     g.energy = Math.max(0, g.energy - 15);
     say(g, '接触！ ハート −1 / 2秒の保護');
@@ -425,14 +528,20 @@ export function step(g: Game, dt = STEP) {
   g.elapsed += dt;
   g.timeLeft = Math.max(0, g.timeLeft - dt);
   g.invincible = Math.max(0, g.invincible - dt);
+  g.fever = Math.max(0, g.fever - dt);
   g.dash = Math.max(0, g.dash - dt);
   g.pulse = Math.max(0, g.pulse - dt);
   g.cooldown = Math.max(0, g.cooldown - dt);
   g.messageLeft = Math.max(0, g.messageLeft - dt);
   g.comboLeft = Math.max(0, g.comboLeft - dt);
-  if (!g.comboLeft) g.combo = 0;
+  if (!g.comboLeft) {
+    g.combo = 0;
+    g.feverCharge = 0;
+  }
   g.energy = Math.min(100, g.energy + m.regen * dt);
   g.acid = Math.min(100, g.acid + m.acidRate * dt);
+  // Detect an expired shield on an occupied tile even while both actors stand still.
+  collision(g);
   g.moveClock += dt;
   const interval = m.playerStep / (g.dash > 0 ? 1.65 : 1);
   if (g.moveClock >= interval) {
@@ -453,6 +562,8 @@ export function step(g: Game, dt = STEP) {
   for (const e of g.enemies) {
     e.stunned = Math.max(0, e.stunned - dt);
     if (e.stunned > 0) continue;
+    // A competitor waking on the player must not escape a contact check by moving first.
+    collision(g);
     e.clock += dt;
     const slow = g.acid >= 60 && protectedZone(e) ? 1.6 : 1;
     if (e.clock >= (m.enemyStep * slow) / (1 + g.wave * 0.08)) {

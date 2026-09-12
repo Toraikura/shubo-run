@@ -1,0 +1,112 @@
+{
+  "version": "2.0.0",
+  "unitTests": 25,
+  "webkit": {
+    "url": "http://127.0.0.1:4187/",
+    "testedAt": "2026-09-12T07:03:22.572Z",
+    "engine": "Playwright WebKit with touch emulation; not a real iPhone",
+    "viewports": [
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "status": "passed",
+        "bounds": {
+          ".field": {
+            "x": 0,
+            "y": 0,
+            "width": 390,
+            "height": 844
+          },
+          ".board": {
+            "x": 6,
+            "y": 192,
+            "width": 378,
+            "height": 378
+          },
+          ".touch-controls": {
+            "x": 6,
+            "y": 700,
+            "width": 378,
+            "height": 138
+          },
+          ".dpad": {
+            "x": 16,
+            "y": 702,
+            "width": 136,
+            "height": 136
+          }
+        },
+        "checks": [
+          "initial page loads without horizontal overflow",
+          "active board and thumb controls fit; direction and skill targets >=44px",
+          "real-time touch move, stop, and dash work",
+          "pause freezes real time and explicit resume restarts it",
+          "sound opt-in/toggle and daily-course preference survive reload",
+          "normal clock-driven loss and touch retry restore playable state"
+        ],
+        "errors": []
+      },
+      {
+        "viewport": {
+          "width": 320,
+          "height": 568
+        },
+        "status": "passed",
+        "bounds": {
+          ".field": {
+            "x": 0,
+            "y": 0,
+            "width": 320,
+            "height": 568
+          },
+          ".board": {
+            "x": 48,
+            "y": 131,
+            "width": 224,
+            "height": 224
+          },
+          ".touch-controls": {
+            "x": 6,
+            "y": 424,
+            "width": 308,
+            "height": 138
+          },
+          ".dpad": {
+            "x": 16,
+            "y": 426,
+            "width": 136,
+            "height": 136
+          }
+        },
+        "checks": [
+          "initial page loads without horizontal overflow",
+          "active board and thumb controls fit; direction and skill targets >=44px",
+          "real-time touch move, stop, and dash work",
+          "pause freezes real time and explicit resume restarts it",
+          "sound opt-in/toggle and daily-course preference survive reload",
+          "normal clock-driven loss and touch retry restore playable state"
+        ],
+        "errors": []
+      }
+    ],
+    "status": "passed"
+  },
+  "science": "fictional game coefficients; existing scientific sources unchanged",
+  "realIPhoneSafari": "NOT TESTED",
+  "chromium": {
+    "passed": 27,
+    "failed": 0,
+    "skipped": 0,
+    "lastRun": {
+      "status": "passed",
+      "failedTests": []
+    }
+  },
+  "build": {
+    "dist/index.html": "e64b64808ac840a420341ad4ed3ab4cce508c8ced93ac648028a1facad12d4d9",
+    "dist/assets/index-C_XjalZs.css": "236562c74bbd11b6218b9b39fc94cef1d775fb09b20710c3e797db7a83ddee7b",
+    "dist/assets/index-CfPWwCPk.js": "e201a55dc00005b5a12367e20fb7da39e70f9271873d513de28f4cd8f5104398"
+  }
+}

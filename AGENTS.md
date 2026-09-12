@@ -8,3 +8,6 @@
 - Validate with npm ci; npm run lint; npm run typecheck; npm test; npm run build. Browser tests: npx playwright install --with-deps chromium; npm run test:e2e -- --workers=3.
 - Browser viewport emulation is not real iPhone Safari testing. Report testing scope honestly.
 - main automatically publishes this game through GitHub Pages after CI. Do not modify the other game's repository or any parent site's publishing settings.
+
+- v2 adds fever collection multiplier, inter-wave support and seeded connected layouts. Keep classic seed260907 route stable and test nonclassic seeds for connectivity. Preserve legacy records when changing preferences.
+- scripts/verify-webkit.mjs (if present) tests desktop WebKit with touch emulation, never real iPhone Safari. Keep engine-specific CDP touch tests in Chromium.
