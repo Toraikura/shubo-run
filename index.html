@@ -2,27 +2,71 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#112f2c" />
-    <meta
-      name="description"
-      content="糖を集め、競合をかわす。10連続でフィーバー！スワイプで遊ぶ酒母テーマの3ステージ・アーケード。"
-    />
+    <meta name="description" content="糖を集め、競合をかわす。10連続でフィーバー！スワイプで遊ぶ酒母テーマの3ステージ・アーケード。" />
     <title>SHUBO RUN — SAT 酒母アーケード</title>
-    <link
-      rel="icon"
-      type="image/svg+xml"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%2314664e'/%3E%3Ctext x='20' y='26' text-anchor='middle' fill='white' font-size='19'%3ES%3C/text%3E%3C/svg%3E"
-    />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%2314664e'/%3E%3Ctext x='20' y='26' text-anchor='middle' fill='white' font-size='19'%3ES%3C/text%3E%3C/svg%3E" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- Optional navigation only: no new analytics SDK; play and saves stay local. -->
-    <script defer src="https://toraikura.github.io/sat-fermentation-playground/fpg-navigation.js?v=20260923-1"></script>
+    <!-- FPG navigation is bundled: no runtime requests, telemetry, or game-state changes. -->
+    <template id="fpgNavigationTemplate">
+      <style>
+        :host{display:block;width:100%;min-width:0;margin-top:14px;font:14px/1.5 system-ui,sans-serif;color:#183b30;text-align:left;letter-spacing:normal;text-transform:none;color-scheme:light}*{box-sizing:border-box}details{background:#f5f1e7;border:1px solid #ccc9bb;border-radius:10px}summary{padding:12px;min-height:44px;cursor:pointer;font-weight:700;font-size:12px}nav{padding:0 12px 12px}a{display:block;color:inherit;text-decoration:none;min-height:44px;border-radius:8px}a:focus-visible,summary:focus-visible{outline:3px solid #097e6a;outline-offset:2px}.next{padding:13px;background:#174d40;color:#fff}.next small{display:block;font-size:11px}.next strong{display:block;font:800 19px/1.4 ui-monospace,monospace;margin:4px 0}.next span{font-size:12px;display:block}.hub{padding:12px 0;font-weight:700;font-size:13px}.places{display:grid;grid-template-columns:1fr 1fr;gap:8px}.places a{padding:11px;border:1px solid #dad6c9;background:#fffdf6}.places small{display:block;font:700 9px/1.5 ui-monospace,monospace}.places strong{display:block;font-size:14px;margin-top:4px}.age{font-size:10px;margin:10px 0 0;color:#526858}@media(max-width:360px){.places{grid-template-columns:1fr}}
+      </style>
+      <details>
+        <summary>ほかのゲーム・赤坂で飲む・SATのお酒を見る</summary>
+        <nav aria-label="FERMENTATION PLAYGROUNDの次の行き先">
+          <a class="next" href="https://toraikura.github.io/sake-clash/"><small>もう一本、遊んでいく？</small><strong>SAKE CLASH</strong><span>カードを配置し、酒蔵の陣取りに挑む →</span></a>
+          <a class="hub" href="https://toraikura.github.io/sat-fermentation-playground/">全7体験から選ぶ →</a>
+          <div class="places">
+            <a href="https://chilllabo.com/"><small>CHILL LABO AKASAKA</small><strong>今度は、赤坂で飲み比べる。 ↗</strong></a>
+            <a href="https://sakearttokyo.com/"><small>SAKE ART TOKYO</small><strong>SATのお酒・つくり手を見る。 ↗</strong></a>
+          </div>
+          <p class="age">飲酒・お酒の購入は20歳以上の方へ。</p>
+        </nav>
+      </details>
+    </template>
+    <script>
+      (() => {
+        'use strict';
+        const root = document.getElementById('root');
+        const template = document.getElementById('fpgNavigationTemplate');
+        if (!root || !template) return;
+        let queued = false;
+        function render() {
+          queued = false;
+          const card = root.querySelector('.overlay > .overlay-card, .overlay > .paper-card');
+          if (!card) return;
+          const result = card.matches('.result-card, .result');
+          let host = card.querySelector(':scope > fpg-next');
+          if (!host) {
+            host = document.createElement('fpg-next');
+            host.attachShadow({mode:'open'}).append(template.content.cloneNode(true));
+            card.append(host);
+            card.style.maxHeight = 'calc(100% - 16px)';
+            card.style.overflowY = 'auto';
+            card.style.overscrollBehavior = 'contain';
+          }
+          if (host.dataset.result !== String(result)) {
+            host.dataset.result = String(result);
+            host.shadowRoot.querySelector('details').open = result;
+          }
+        }
+        new MutationObserver(records => {
+          if (queued || !records.some(record => {
+            const changes = [...record.addedNodes, ...record.removedNodes];
+            if (changes.length && changes.every(node => node.nodeType === 1 && node.tagName === 'FPG-NEXT')) return false;
+            return record.target instanceof Element && record.target.closest('.overlay') || changes.some(node => node instanceof Element && (node.matches('.overlay') || node.querySelector('.overlay')));
+          })) return;
+          queued = true;
+          requestAnimationFrame(render);
+        }).observe(root, {childList:true,subtree:true});
+        render();
+      })();
+    </script>
     <noscript><nav aria-label="FERMENTATION PLAYGROUND"><a href="https://toraikura.github.io/sat-fermentation-playground/">ほかのゲームを見る</a> / <a href="https://chilllabo.com/">赤坂で飲み比べる</a> / <a href="https://sakearttokyo.com/">SATのお酒を見る</a></nav></noscript>
   </body>
 </html>
