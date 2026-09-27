@@ -11,7 +11,7 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- FPG navigation is bundled: no runtime requests, telemetry, or game-state changes. -->
+    <!-- FPG navigation is bundled. Public GitHub Pages uses GA4 for requested traffic/navigation measurement; gameplay and saves stay local. -->
     <template id="fpgNavigationTemplate">
       <style>
         :host{display:block;width:100%;min-width:0;margin-top:14px;font:14px/1.5 system-ui,sans-serif;color:#183b30;text-align:left;letter-spacing:normal;text-transform:none;color-scheme:light}*{box-sizing:border-box}details{background:#f5f1e7;border:1px solid #ccc9bb;border-radius:10px}summary{padding:12px;min-height:44px;cursor:pointer;font-weight:700;font-size:12px}nav{padding:0 12px 12px}a{display:block;color:inherit;text-decoration:none;min-height:44px;border-radius:8px}a:focus-visible,summary:focus-visible{outline:3px solid #097e6a;outline-offset:2px}.next{padding:13px;background:#174d40;color:#fff}.next small{display:block;font-size:11px}.next strong{display:block;font:800 19px/1.4 ui-monospace,monospace;margin:4px 0}.next span{font-size:12px;display:block}.hub{padding:12px 0;font-weight:700;font-size:13px}.places{display:grid;grid-template-columns:1fr 1fr;gap:8px}.places a{padding:11px;border:1px solid #dad6c9;background:#fffdf6}.places small{display:block;font:700 9px/1.5 ui-monospace,monospace}.places strong{display:block;font-size:14px;margin-top:4px}.age{font-size:10px;margin:10px 0 0;color:#526858}@media(max-width:360px){.places{grid-template-columns:1fr}}
@@ -19,11 +19,11 @@
       <details>
         <summary>ほかのゲーム・赤坂で飲む・SATのお酒を見る</summary>
         <nav aria-label="FERMENTATION PLAYGROUNDの次の行き先">
-          <a class="next" href="https://toraikura.github.io/sake-clash/"><small>もう一本、遊んでいく？</small><strong>SAKE CLASH</strong><span>カードを配置し、酒蔵の陣取りに挑む →</span></a>
-          <a class="hub" href="https://toraikura.github.io/sat-fermentation-playground/">全7体験から選ぶ →</a>
+          <a class="next" href="https://toraikura.github.io/sake-clash/" data-fpg-destination="game" data-fpg-to="sake-clash"><small>もう一本、遊んでいく？</small><strong>SAKE CLASH</strong><span>カードを配置し、酒蔵の陣取りに挑む →</span></a>
+          <a class="hub" href="https://toraikura.github.io/sat-fermentation-playground/" data-fpg-destination="hub">全7体験から選ぶ →</a>
           <div class="places">
-            <a href="https://chilllabo.com/"><small>CHILL LABO AKASAKA</small><strong>今度は、赤坂で飲み比べる。 ↗</strong></a>
-            <a href="https://sakearttokyo.com/"><small>SAKE ART TOKYO</small><strong>SATのお酒・つくり手を見る。 ↗</strong></a>
+            <a href="https://chilllabo.com/" data-fpg-destination="chill-labo"><small>CHILL LABO AKASAKA</small><strong>今度は、赤坂で飲み比べる。 ↗</strong></a>
+            <a href="https://sakearttokyo.com/" data-fpg-destination="sake-art-tokyo"><small>SAKE ART TOKYO</small><strong>SATのお酒・つくり手を見る。 ↗</strong></a>
           </div>
           <p class="age">飲酒・お酒の購入は20歳以上の方へ。</p>
         </nav>
@@ -44,7 +44,29 @@
           let host = card.querySelector(':scope > fpg-next');
           if (!host) {
             host = document.createElement('fpg-next');
-            host.attachShadow({mode:'open'}).append(template.content.cloneNode(true));
+            const shadow = host.attachShadow({mode:'open'});
+            shadow.append(template.content.cloneNode(true));
+            shadow.addEventListener('click', event => {
+              const anchor = event.target instanceof Element && event.target.closest('a[data-fpg-destination]');
+              if (!anchor) return;
+              const placement = host.dataset.result === 'true' ? 'result' : 'menu';
+              const destination = anchor.dataset.fpgDestination || '';
+              const toGame = anchor.dataset.fpgTo || '';
+              window.satAnalytics?.track('fpg_navigation_click', {
+                from_game: 'shubo-run',
+                placement,
+                destination,
+                to_game: toGame,
+                link_url: anchor.href
+              });
+              if (destination === 'game') {
+                try {
+                  sessionStorage.setItem('fpg_navigation_pending', JSON.stringify({
+                    from: 'shubo-run', to: toGame, placement, at: Date.now()
+                  }));
+                } catch (_) {}
+              }
+            });
             card.append(host);
             card.style.maxHeight = 'calc(100% - 16px)';
             card.style.overflowY = 'auto';
@@ -65,6 +87,88 @@
           requestAnimationFrame(render);
         }).observe(root, {childList:true,subtree:true});
         render();
+      })();
+    </script>
+
+    <script>
+      (() => {
+        'use strict';
+        const MEASUREMENT_ID = 'G-3L1Q0VYVRH';
+        const SOURCE = 'shubo-run';
+        const EXPERIENCE = 'SHUBO RUN';
+        const enabled = location.hostname === 'toraikura.github.io';
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = window.gtag || function(){ window.dataLayer.push(arguments); };
+        const track = (name, detail = {}) => {
+          if (!enabled) return;
+          window.gtag('event', name, { experience: EXPERIENCE, page_path: location.pathname, ...detail });
+        };
+        window.satAnalytics = { track };
+
+        const params = new URLSearchParams(location.search);
+        const landingKey = 'sat_fpg_landing';
+        let landing = null;
+        try {
+          landing = sessionStorage.getItem(landingKey);
+          if (!landing) {
+            landing = JSON.stringify({
+              path: location.pathname + location.search,
+              referrer: document.referrer || '(direct)',
+              utm_source: params.get('utm_source') || '',
+              utm_medium: params.get('utm_medium') || '',
+              utm_campaign: params.get('utm_campaign') || ''
+            });
+            sessionStorage.setItem(landingKey, landing);
+          }
+        } catch (_) {}
+
+        if (enabled) {
+          const loader = document.createElement('script');
+          loader.async = true;
+          loader.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(MEASUREMENT_ID);
+          document.head.appendChild(loader);
+          window.gtag('js', new Date());
+          window.gtag('config', MEASUREMENT_ID, {
+            content_group: EXPERIENCE,
+            page_path: location.pathname + location.search
+          });
+          let entry = {};
+          try { entry = JSON.parse(landing || '{}'); } catch (_) {}
+          track('experience_view', {
+            landing_path: entry.path || location.pathname,
+            landing_referrer: entry.referrer || document.referrer || '(direct)',
+            utm_source: entry.utm_source || '',
+            utm_medium: entry.utm_medium || '',
+            utm_campaign: entry.utm_campaign || ''
+          });
+        }
+
+        try {
+          const raw = sessionStorage.getItem('fpg_navigation_pending');
+          if (raw) {
+            const pending = JSON.parse(raw);
+            if (pending.to === SOURCE) {
+              sessionStorage.removeItem('fpg_navigation_pending');
+              const age = Date.now() - Number(pending.at || 0);
+              if (age >= 0 && age < 30 * 60 * 1000) {
+                track('fpg_navigation_arrival', {
+                  from_game: pending.from || '',
+                  to_game: SOURCE,
+                  placement: pending.placement || ''
+                });
+              }
+            }
+          }
+        } catch (_) {}
+
+        document.addEventListener('click', event => {
+          if (!(event.target instanceof Element)) return;
+          const button = event.target.closest('.overlay-card button.primary');
+          if (button) {
+            const card = button.closest('.overlay-card');
+            window.satAnalytics.track(card?.classList.contains('result-card') ? 'game_retry' : 'game_start', { game_name: EXPERIENCE });
+          }
+        }, { capture: true, passive: true });
       })();
     </script>
     <noscript><nav aria-label="FERMENTATION PLAYGROUND"><a href="https://toraikura.github.io/sat-fermentation-playground/">ほかのゲームを見る</a> / <a href="https://chilllabo.com/">赤坂で飲み比べる</a> / <a href="https://sakearttokyo.com/">SATのお酒を見る</a></nav></noscript>
